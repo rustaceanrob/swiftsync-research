@@ -1,0 +1,6 @@
+/target
+!justfile
+Cargo.lock
+*.csv
+*.gif
+*.png
