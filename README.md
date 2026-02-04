@@ -11,3 +11,7 @@ The lifetime of a coin, as in the number of blocks between when a coin is create
 To build the `csv` table of coin age to number of occurances, set the `BITCOIN_DIR` to the absolute path of your bitcoin data directory.
 
 `export BITCOIN_DIR=/path/to/bitcoin/datadir && cargo run --bin generate --release`
+
+Plot the results to `plot.png` with an optional upper bound on age.
+
+`cargo run --bin generate --release 10000 #filter coins with ages older than 10000`

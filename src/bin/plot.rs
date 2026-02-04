@@ -9,11 +9,18 @@ struct Row {
 }
 
 fn main() {
-    let map = read_csv_to_btreemap("ages.csv");
+    let mut args = std::env::args();
+    let _ = args.next().unwrap();
+    let age = args.next().map(|filter| {
+        filter
+            .parse::<u32>()
+            .expect("provide an integer for age filter.")
+    });
+    let map = read_csv_to_btreemap("ages.csv", age);
     plot_age_count(map, "plot.png");
 }
 
-fn read_csv_to_btreemap(path: &str) -> BTreeMap<u32, u64> {
+fn read_csv_to_btreemap(path: &str, filter: Option<u32>) -> BTreeMap<u32, u64> {
     let mut map = BTreeMap::new();
     let mut rdr =
         Reader::from_path(path).expect("could not find `ages.csv`. have you ran `generate.rs`?");
@@ -21,6 +28,11 @@ fn read_csv_to_btreemap(path: &str) -> BTreeMap<u32, u64> {
         let record: Row = result.unwrap();
         let age: u32 = record.age;
         let count: u64 = record.count;
+        if let Some(filter) = filter {
+            if age > filter {
+                continue;
+            }
+        }
         println!("Coin age {age}, number of occurrences {count}");
         map.insert(age, count);
     }
@@ -39,7 +51,7 @@ fn plot_age_count(data: BTreeMap<u32, u64>, path: &str) {
         .margin(20)
         .x_label_area_size(50)
         .y_label_area_size(80)
-        .build_cartesian_2d(0u32..max_age, (1u64..max_count * 2).log_scale())
+        .build_cartesian_2d(0u32..max_age, (0u64..max_count * 2).log_scale())
         .unwrap();
 
     chart
@@ -59,13 +71,11 @@ fn plot_age_count(data: BTreeMap<u32, u64>, path: &str) {
         .unwrap();
 
     chart
-        .draw_series(LineSeries::new(
-            data.iter().map(|(&age, &count)| (age, count.max(1))),
-            BLUE.stroke_width(2),
-        ))
-        .unwrap()
-        .label("UTXOs")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], BLUE.stroke_width(2)));
+        .draw_series(
+            data.iter()
+                .map(|(&age, &count)| Circle::new((age, count.max(1)), 3, BLUE.filled())),
+        )
+        .unwrap();
 
     chart
         .configure_series_labels()
