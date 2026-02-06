@@ -16,7 +16,7 @@ fn main() {
             .parse::<u32>()
             .expect("provide an integer for age filter.")
     });
-    let map = read_csv_to_btreemap("ages.csv", age);
+    let map = read_csv_to_btreemap("counts.csv", age);
     plot_age_count(map, "plot.png");
 }
 
