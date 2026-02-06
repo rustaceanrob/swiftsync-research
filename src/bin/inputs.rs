@@ -15,6 +15,10 @@ fn average(percentages: &[f64]) -> f64 {
     percentages.iter().sum::<f64>() / percentages.len() as f64
 }
 
+fn median(percentages: &[f64]) -> f64 {
+    percentages[percentages.len() / 2]
+}
+
 fn read_csv(path: &str) {
     let mut rdr =
         Reader::from_path(path).expect("could not find `ages.csv`. have you ran `generate.rs`?");
@@ -34,6 +38,9 @@ fn read_csv(path: &str) {
     for result in rdr.records().skip(1) {
         let record: StringRecord = result.unwrap();
         let block = record[0].parse::<u32>().unwrap();
+        if block < 100_000 {
+            continue;
+        }
         let ages = record[1].parse::<String>().unwrap();
         if ages.is_empty() {
             continue;
@@ -65,12 +72,25 @@ fn read_csv(path: &str) {
     println!(" ");
     println!(">>> Summary >>>");
     println!(" ");
-    println!("percentage 5 blocks or earlier {:.4}", average(&total_5));
-    println!("percentage 10 blocks or earlier {:.4}", average(&total_10));
-    println!("percentage 50 blocks or earlier {:.4}", average(&total_50));
     println!(
-        "percentage 100 blocks or earlier {:.4}",
-        average(&total_100)
+        "percentage 5 blocks or earlier {:.4}, median: {:.4}",
+        average(&total_5),
+        median(&total_5)
+    );
+    println!(
+        "percentage 10 blocks or earlier {:.4}, median: {:.4}",
+        average(&total_10),
+        median(&total_10)
+    );
+    println!(
+        "percentage 50 blocks or earlier {:.4}, median: {:.4}",
+        average(&total_50),
+        median(&total_50)
+    );
+    println!(
+        "percentage 100 blocks or earlier {:.4}, median: {:.4}",
+        average(&total_100),
+        median(&total_100)
     );
     println!(" ");
     println!("Flushed results to `percentages.csv`");
