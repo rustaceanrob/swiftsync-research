@@ -1,24 +1,21 @@
 use kernel::{
     ChainType, ChainstateManager, ContextBuilder,
-    core::{TransactionExt, TxInExt, TxOutPointExt, TxidExt},
+    core::{BlockSpentOutputsExt, CoinExt, TransactionSpentOutputsExt},
 };
-use std::{
-    collections::{BTreeMap, HashMap},
-    path::PathBuf,
-};
+use std::{collections::BTreeMap, path::PathBuf};
 
 type Age = u32;
 type Count = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct OutPoint {
-    txid: [u8; 32],
-    vout: usize,
-}
-
 fn main() {
     let bitcoin_dir = std::env::var("BITCOIN_DIR").unwrap();
     println!("Using directory {bitcoin_dir}");
+    let mut args = std::env::args();
+    let _ = args.next().unwrap();
+    let mut include_coinbase = false;
+    if args.next().is_some() {
+        include_coinbase = true;
+    }
     let data_dir = bitcoin_dir.parse::<PathBuf>().unwrap();
     let blocks_dir = data_dir.join("blocks");
     let context = ContextBuilder::new()
@@ -33,9 +30,7 @@ fn main() {
     .unwrap();
     chainman.import_blocks().unwrap();
     let mut ages: BTreeMap<Age, Count> = BTreeMap::new();
-    let mut births: HashMap<OutPoint, Age> = HashMap::new();
     let mut block_input_ages: BTreeMap<u32, Vec<Age>> = BTreeMap::new();
-    let mut total_outputs: u128 = 0;
     let chain = chainman.active_chain();
     for entry in chain.iter() {
         println!(
@@ -44,31 +39,21 @@ fn main() {
             entry.height()
         );
         let curr_height: u32 = entry.height().try_into().unwrap();
-        let block = chainman.read_block_data(&entry).unwrap();
-        let mut inputs_ages = Vec::new();
-        for transaction in block.transactions().skip(1) {
-            let txid = transaction.txid().to_bytes();
-            for (vout, _) in transaction.outputs().enumerate() {
-                total_outputs += 1;
-                births.insert(OutPoint { txid, vout }, curr_height);
-            }
-            for input in transaction.inputs() {
-                let outpoint = input.outpoint();
-                let txid = outpoint.txid().to_bytes();
-                let vout = outpoint.index() as usize;
-                if let Some(non_coinbase_birth) = births.remove(&OutPoint { txid, vout }) {
-                    *ages.entry(curr_height - non_coinbase_birth).or_insert(0) += 1;
-                    inputs_ages.push(curr_height - non_coinbase_birth);
+        let undo = chainman.read_spent_outputs(&entry).unwrap();
+        let mut block_ages = Vec::new();
+        for transaction in undo.iter() {
+            for coin in transaction.coins() {
+                let creation_height = coin.confirmation_height();
+                let is_coinbase = coin.is_coinbase();
+                if !is_coinbase || include_coinbase {
+                    let age = curr_height - creation_height;
+                    *ages.entry(age).or_insert(0) += 1;
+                    block_ages.push(age);
                 }
             }
         }
-        block_input_ages.insert(curr_height, inputs_ages);
+        block_input_ages.insert(curr_height, block_ages);
     }
-    println!(
-        "{}/{} remaining outpoints remain unspent.",
-        births.len(),
-        total_outputs
-    );
     println!("Writing coin age counts to CSV");
     write_ages_to_csv(ages);
     println!("Writing block input ages to CSV");
