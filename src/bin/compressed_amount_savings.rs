@@ -20,7 +20,8 @@ fn main() {
     )
     .unwrap();
     chainman.import_blocks().unwrap();
-    let mut compressed_amount_savings: u128 = 0;
+    let mut varint_amount_savings: u128 = 0;
+    let mut compact_amount_savings: u128 = 0;
     let chain = chainman.active_chain();
     for entry in chain.iter() {
         println!(
@@ -34,9 +35,17 @@ fn main() {
                 let tx_out = coin.output();
                 let amount = tx_out.value() as u64;
                 let compressed = swiftsync_research::compress_amount(amount);
-                let size_bytes = swiftsync_research::size_varint(compressed);
-                if size_bytes < 8 {
-                    compressed_amount_savings += 8 - size_bytes as u128;
+                let varint = swiftsync_research::size_varint(compressed);
+                let compact_size = swiftsync_research::compact_size(compressed);
+                if varint < 8 {
+                    varint_amount_savings += 8 - varint as u128;
+                } else {
+                    varint_amount_savings -= 1;
+                }
+                if compact_size < 8 {
+                    compact_amount_savings += 8 - compact_size as u128;
+                } else {
+                    compact_amount_savings -= 1;
                 }
             }
         }
@@ -45,7 +54,11 @@ fn main() {
         }
     }
     println!(
-        "Total potential compressed amount savings {}GB",
-        compressed_amount_savings / 1_000_000_000
+        "Total potential compressed amount savings with VarInt {}MB",
+        varint_amount_savings / 1_000_000
+    );
+    println!(
+        "Total potential compressed amount savings with CompactSize {}MB",
+        compact_amount_savings / 1_000_000
     );
 }

@@ -6,6 +6,16 @@ pub fn is_reference_height(entry: BlockTreeEntry) -> bool {
     entry.height() == REFERENCE_HEIGHT
 }
 
+#[inline]
+pub const fn compact_size(value: u64) -> usize {
+    match value {
+        0..=0xFC => 1,
+        0xFD..=0xFFFF => 3,
+        0x10000..=0xFFFF_FFFF => 5,
+        _ => 9,
+    }
+}
+
 pub fn compress_amount(mut n: u64) -> u64 {
     if n == 0 {
         return 0;
