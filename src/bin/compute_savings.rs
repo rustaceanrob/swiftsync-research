@@ -93,6 +93,9 @@ fn main() {
                 total_extra += 1
             }
         }
+        if swiftsync_research::is_reference_height(entry) {
+            break;
+        }
     }
     println!("Savings: {}MB", total_savings_bytes / 1_000_000);
     println!("P2TR: {}MB", total_p2tr / 1_000_000);

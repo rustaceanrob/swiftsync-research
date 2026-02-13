@@ -53,6 +53,9 @@ fn main() {
             }
         }
         block_input_ages.insert(curr_height, block_ages);
+        if swiftsync_research::is_reference_height(entry) {
+            break;
+        }
     }
     println!("Writing coin age counts to CSV");
     write_ages_to_csv(ages);

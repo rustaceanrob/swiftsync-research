@@ -42,6 +42,9 @@ fn main() {
                 }
             }
         }
+        if swiftsync_research::is_reference_height(entry) {
+            break;
+        }
     }
     println!("Total uncompressed P2PK {uncompressed_p2pk_count}");
 }
