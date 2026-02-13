@@ -108,5 +108,5 @@ fn main() {
         "P2PK Uncompressed: {}MB",
         total_p2pk_uncompressed / 1_000_000
     );
-    println!("Count unknown scripts: {}MB", total_extra);
+    println!("Count unknown scripts: {}", total_extra);
 }

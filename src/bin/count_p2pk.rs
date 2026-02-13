@@ -46,5 +46,8 @@ fn main() {
             break;
         }
     }
-    println!("Total uncompressed P2PK {uncompressed_p2pk_count}");
+    println!(
+        "Total uncompressed P2PK compression availability: {}MB",
+        (uncompressed_p2pk_count * 32) / 1_000_000
+    );
 }
