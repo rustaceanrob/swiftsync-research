@@ -8,6 +8,8 @@ use kernel::BlockTreeEntry;
 
 const REFERENCE_HEIGHT: i32 = 930_000;
 
+pub mod ef;
+
 pub fn is_reference_height(entry: BlockTreeEntry) -> bool {
     entry.height() == REFERENCE_HEIGHT
 }
@@ -116,7 +118,7 @@ impl BitmapHints {
     ///
     /// If there are no offset present at that height, aka an overflow, or the entry has already
     /// been fetched.
-    pub fn get_indexes(&mut self, height: BlockHeight) -> Vec<u64> {
+    pub fn get_indexes(&mut self, height: BlockHeight) -> Vec<u16> {
         let file_pos = self
             .map
             .get(&height)
@@ -138,7 +140,7 @@ impl BitmapHints {
                 curr_byte = u8::from_le_bytes(single_byte_arr);
             }
             if ((curr_byte >> leftovers) & 0x01) == 0x01 {
-                unspents.push(bit_pos as u64);
+                unspents.push(bit_pos as u16);
             }
         }
         unspents

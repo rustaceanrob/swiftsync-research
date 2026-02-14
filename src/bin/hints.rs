@@ -18,7 +18,7 @@ fn main() {
             .iter()
             .zip(indices.iter().skip(1))
             .map(|(first, second)| second - first)
-            .collect::<Vec<u64>>();
+            .collect::<Vec<u16>>();
         all_rle.extend_from_slice(&rle);
         let max_diff = *rle.iter().max().unwrap_or(&0);
         if max_diff > max_rle {
@@ -26,8 +26,8 @@ fn main() {
         }
         maxes.push(max_rle);
     }
-    let avg_rle: u64 = all_rle.iter().sum::<u64>() / all_rle.len() as u64;
-    let avg_max: u64 = maxes.iter().sum::<u64>() / all_rle.len() as u64;
+    let avg_rle: u16 = all_rle.iter().sum::<u16>() / all_rle.len() as u16;
+    let avg_max: u16 = maxes.iter().sum::<u16>() / all_rle.len() as u16;
     maxes.sort_unstable();
     let median_max = maxes[maxes.len() / 2];
     println!("Avg run length encoded {avg_rle}");
