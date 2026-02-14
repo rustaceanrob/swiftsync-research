@@ -30,7 +30,7 @@ export BITCOIN_DIR=/path/to/bitcoin/datadir && cargo run --bin compressed_amount
 export BITCOIN_DIR=/path/to/bitcoin/datadir && cargo run --bin count_p2pk --release
 ```
 
-- Analyze the liftime (age), of a coin follows an empirical distribution. To build the `csv` table of coin age to number of occurrences:
+- Analyze the lifetime (age), of a coin follows an empirical distribution. To build the `csv` table of coin age to number of occurrences:
 
 ```
 export BITCOIN_DIR=/path/to/bitcoin/datadir && cargo run --bin compute_coin_ages --release
@@ -49,5 +49,5 @@ curl -o bitcoin.hints https://utxohints.store/hints/bitcoin
 ```
 
 ```
-cargo run --bin hints --release
+export HINTS_FILE=/path/to/bitcoin.hints && cargo run --bin hints --release
 ```

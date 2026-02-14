@@ -3,7 +3,10 @@ use std::fs::File;
 use swiftsync_research::BitmapHints;
 
 fn main() {
-    let file = File::open("/home/rob/swiftsync/node/bitcoin.hints").unwrap();
+    let hints_file = std::env::var("HINTS_FILE").unwrap();
+    println!("Using hintsfile {hints_file}");
+    let hints_file = hints_file.parse::<std::path::PathBuf>().unwrap();
+    let file = File::open(hints_file).unwrap();
     let mut hints = BitmapHints::from_file(file);
     let mut max_rle = 0;
     let stop = hints.stop_height();
