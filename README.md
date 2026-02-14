@@ -1,21 +1,53 @@
-# Bitcoin Coin Age
+# SwiftSync Protocol Research
 
-This crate contains tools for analzying the creation and spending patterns of coins in the bitcoin blockchain.
+Collection of statistics to drive _SwiftSync_ protocol decisions.
 
 ## Background
 
-The lifetime of a coin, as in the number of blocks between when a coin is created and when it is spent, does not follow a uniform distribution. Most coins are spent within a handful of blocks of when they were created. This pattern, as long as it exists, can be used for database caching.
+_SwiftSync_ requires the inputs of a block be served by peers. To minimize the bandwidth required to for clients to perform _SwiftSync_, compression techniques are used on each field of the input coins. Further reduction can be achieved with caching strategies.
 
-## Quick Start
+A concise representation of the UTXO set must also be shared to use _SwiftSync_. Encoding of this file depends largely on the distribution of these coins within historical blocks.
 
-To build the `csv` table of coin age to number of occurances, set the `BITCOIN_DIR` to the absolute path of your bitcoin data directory.
+## Binaries
 
-`export BITCOIN_DIR=/path/to/bitcoin/datadir && cargo run --bin generate --release`
+Set your `BITCOIN_DIR` environment variable to an absolute path to your Bitcoin data directory.
 
-Plot the results to `plot.png` with an optional upper bound on age.
+- Report the savings due to the `ReconstructableScript` format:
 
-`cargo run --bin plot --release 10000 #filter coins with ages older than 10000`
+```
+export BITCOIN_DIR=/path/to/bitcoin/datadir && cargo run --bin reconstructable_script_savings --release
+```
 
-To count the number of uncompressed bare public key outputs that have been spent:
+- Report the savings due to the amount compression format:
 
-`export BITCOIN_DIR=/path/to/bitcoin/datadir && cargo run --bin count_p2pk --release`
+```
+export BITCOIN_DIR=/path/to/bitcoin/datadir && cargo run --bin compressed_amount_savings --release
+```
+
+- Count P2PK outputs that are uncompressed:
+
+```
+export BITCOIN_DIR=/path/to/bitcoin/datadir && cargo run --bin count_p2pk --release
+```
+
+- Analyze the liftime (age), of a coin follows an empirical distribution. To build the `csv` table of coin age to number of occurrences:
+
+```
+export BITCOIN_DIR=/path/to/bitcoin/datadir && cargo run --bin compute_coin_ages --release
+```
+
+- Plot the results to `plot.png` with an optional upper bound on age.
+
+```
+cargo run --bin plot --release 10000 #filter coins with ages older than 10000
+```
+
+- Analyze the distribution of coins within blocks, which requires a bitmap to UTXOs in blocks:
+
+```
+curl -o bitcoin.hints https://utxohints.store/hints/bitcoin
+```
+
+```
+cargo run --bin hints --release
+```

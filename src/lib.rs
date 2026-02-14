@@ -1,3 +1,9 @@
+use std::collections::BTreeMap;
+use std::fs::File;
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
+
 use kernel::BlockTreeEntry;
 
 const REFERENCE_HEIGHT: i32 = 930_000;
@@ -51,6 +57,90 @@ fn ser_varint(n: u64) -> Vec<u8> {
     tmp
 }
 
+#[inline]
 pub fn size_varint(n: u64) -> usize {
     ser_varint(n).len()
+}
+
+type BlockHeight = u32;
+type FilePos = u64;
+
+#[derive(Debug)]
+pub struct BitmapHints {
+    map: BTreeMap<BlockHeight, FilePos>,
+    file: File,
+    stop_height: BlockHeight,
+}
+
+impl BitmapHints {
+    // # Panics
+    //
+    // Panics when expected data is not present, or the hintfile overflows the maximum blockheight
+    pub fn from_file(mut file: File) -> Self {
+        let mut map = BTreeMap::new();
+        let mut magic = [0; 4];
+        file.read_exact(&mut magic).unwrap();
+        assert_eq!(magic, [0x55, 0x54, 0x58, 0x4f]);
+        let mut ver = [0; 1];
+        file.read_exact(&mut ver).unwrap();
+        if u8::from_le_bytes(ver) != 0x00 {
+            panic!("Unsupported file version.");
+        }
+        let mut stop_height = [0; 4];
+        file.read_exact(&mut stop_height).expect("empty file");
+        let stop_height = BlockHeight::from_le_bytes(stop_height);
+        for _ in 1..=stop_height {
+            let mut height = [0; 4];
+            file.read_exact(&mut height)
+                .expect("expected kv pair does not exist.");
+            let height = BlockHeight::from_le_bytes(height);
+            let mut file_pos = [0; 8];
+            file.read_exact(&mut file_pos)
+                .expect("expected kv pair does not exist.");
+            let file_pos = FilePos::from_le_bytes(file_pos);
+            map.insert(height, file_pos);
+        }
+        Self {
+            map,
+            file,
+            stop_height,
+        }
+    }
+
+    /// Get the stop height of the hint file.
+    pub fn stop_height(&self) -> BlockHeight {
+        self.stop_height
+    }
+
+    /// # Panics
+    ///
+    /// If there are no offset present at that height, aka an overflow, or the entry has already
+    /// been fetched.
+    pub fn get_indexes(&mut self, height: BlockHeight) -> Vec<u64> {
+        let file_pos = self
+            .map
+            .get(&height)
+            .cloned()
+            .expect("block height overflow");
+        self.file
+            .seek(SeekFrom::Start(file_pos))
+            .expect("missing file position.");
+        let mut bits_arr = [0; 4];
+        self.file.read_exact(&mut bits_arr).unwrap();
+        let mut unspents = Vec::new();
+        let num_bits = u32::from_le_bytes(bits_arr);
+        let mut curr_byte: u8 = 0;
+        for bit_pos in 0..num_bits {
+            let leftovers = bit_pos % 8;
+            if leftovers == 0 {
+                let mut single_byte_arr = [0; 1];
+                self.file.read_exact(&mut single_byte_arr).unwrap();
+                curr_byte = u8::from_le_bytes(single_byte_arr);
+            }
+            if ((curr_byte >> leftovers) & 0x01) == 0x01 {
+                unspents.push(bit_pos as u64);
+            }
+        }
+        unspents
+    }
 }
