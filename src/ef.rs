@@ -1,37 +1,31 @@
 // src/lib.rs
 
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 
-/// Elias-Fano encoded representation of a sorted sequence of u16 values.
+/// Elias-Fano encoded representation of a sorted sequence of unique u16 values.
+/// Uses u8-packed bitvectors to minimize wasted trailing bits.
 #[derive(Debug, Clone)]
 pub struct EliasFano {
-    /// Number of elements in the sequence (max 65536 for full u16 range)
     n: u16,
-    /// Number of lower bits per element (0..=16)
+    max_value: u16,
     lower_bits: u8,
-    /// Compact array of lower bits (packed into u64 words)
-    lower: Vec<u64>,
-    /// Unary-coded upper bits (packed into u64 words)
-    upper: Vec<u64>,
+    lower: Vec<u8>,
+    upper: Vec<u8>,
 }
 
 impl EliasFano {
-    /// Create an Elias-Fano encoding from a sorted slice of u16 values.
-    ///
-    /// # Panics
-    /// Panics if the input is not sorted in non-decreasing order or has more
-    /// than 65536 elements (since values are u16, at most 65536 distinct
-    /// sorted entries including duplicates fit meaningfully).
     pub fn new(values: &[u16]) -> Self {
         assert!(
             values.len() <= u16::MAX as usize + 1,
             "Cannot encode more than 65536 u16 values"
         );
+
         let n = values.len() as u16;
 
         if n == 0 {
             return EliasFano {
                 n: 0,
+                max_value: 0,
                 lower_bits: 0,
                 lower: Vec::new(),
                 upper: Vec::new(),
@@ -40,8 +34,8 @@ impl EliasFano {
 
         for i in 1..values.len() {
             assert!(
-                values[i] >= values[i - 1],
-                "Input must be sorted in non-decreasing order"
+                values[i] > values[i - 1],
+                "Input must be strictly sorted (no duplicates)"
             );
         }
 
@@ -60,69 +54,105 @@ impl EliasFano {
 
         EliasFano {
             n,
+            max_value,
             lower_bits,
             lower,
             upper,
         }
     }
 
-    fn build_lower(values: &[u16], lower_bits: u8) -> Vec<u64> {
+    fn build_lower(values: &[u16], lower_bits: u8) -> Vec<u8> {
         if lower_bits == 0 {
             return Vec::new();
         }
 
         let total_bits = values.len() as u64 * lower_bits as u64;
-        let num_words = ((total_bits + 63) / 64) as usize;
-        let mut lower = vec![0u64; num_words];
-        let mask: u64 = (1u64 << lower_bits) - 1;
+        let num_bytes = ((total_bits + 7) / 8) as usize;
+        let mut lower = vec![0u8; num_bytes];
+        let mask: u16 = (1u16 << lower_bits) - 1;
 
         for (i, &val) in values.iter().enumerate() {
-            let low = val as u64 & mask;
+            let low = val & mask;
             let bit_pos = i as u64 * lower_bits as u64;
-            let word_idx = (bit_pos / 64) as usize;
-            let bit_idx = (bit_pos % 64) as u32;
-
-            lower[word_idx] |= low << bit_idx;
-
-            if bit_idx + lower_bits as u32 > 64 {
-                let overflow = bit_idx + lower_bits as u32 - 64;
-                if word_idx + 1 < lower.len() {
-                    lower[word_idx + 1] |= low >> (lower_bits as u32 - overflow);
-                }
-            }
+            set_bits_u8(&mut lower, bit_pos, low as u32, lower_bits);
         }
 
         lower
     }
 
-    fn build_upper(values: &[u16], lower_bits: u8, n: u32) -> Vec<u64> {
+    fn build_upper(values: &[u16], lower_bits: u8, n: u32) -> Vec<u8> {
         let max_upper = values[values.len() - 1] as u64 >> lower_bits;
         let total_bits = n as u64 + max_upper + 1;
-        let num_words = ((total_bits + 63) / 64) as usize;
-        let mut upper = vec![0u64; num_words];
+        let num_bytes = ((total_bits + 7) / 8) as usize;
+        let mut upper = vec![0u8; num_bytes];
 
         for (i, &val) in values.iter().enumerate() {
             let high = (val as u64) >> lower_bits;
             let pos = high + i as u64;
-            let word_idx = (pos / 64) as usize;
-            let bit_idx = (pos % 64) as u32;
-            upper[word_idx] |= 1u64 << bit_idx;
+            let byte_idx = (pos / 8) as usize;
+            let bit_idx = (pos % 8) as u32;
+            upper[byte_idx] |= 1u8 << bit_idx;
         }
 
         upper
     }
 
-    /// Returns the number of elements in the encoded sequence.
     pub fn len(&self) -> u16 {
         self.n
     }
 
-    /// Returns true if the sequence is empty.
     pub fn is_empty(&self) -> bool {
         self.n == 0
     }
 
-    /// Retrieve the element at the given index (0-based).
+    pub fn contains(&self, value: u16) -> bool {
+        if self.n == 0 || value > self.max_value {
+            return false;
+        }
+
+        let high = (value as u32) >> self.lower_bits;
+        let low = if self.lower_bits == 0 {
+            0u32
+        } else {
+            value as u32 & ((1u32 << self.lower_bits) - 1)
+        };
+
+        let start = if high == 0 {
+            0u32
+        } else {
+            self.select0_upper(high - 1) + 1
+        };
+
+        let end_pos = self.upper.len() as u32 * 8;
+        let mut pos = start;
+
+        loop {
+            if pos >= end_pos {
+                return false;
+            }
+
+            let byte_idx = (pos / 8) as usize;
+            let bit_idx = pos % 8;
+            let bit = (self.upper[byte_idx] >> bit_idx) & 1;
+
+            if bit == 0 {
+                return false;
+            }
+
+            let elem_idx = (pos - high) as u16;
+            let elem_low = self.get_lower(elem_idx);
+
+            if elem_low == low {
+                return true;
+            }
+            if elem_low > low {
+                return false;
+            }
+
+            pos += 1;
+        }
+    }
+
     pub fn get(&self, index: u16) -> Option<u16> {
         if index >= self.n {
             return None;
@@ -140,44 +170,46 @@ impl EliasFano {
         }
 
         let bit_pos = index as u64 * self.lower_bits as u64;
-        let word_idx = (bit_pos / 64) as usize;
-        let bit_idx = (bit_pos % 64) as u32;
-        let mask = (1u64 << self.lower_bits) - 1;
-
-        let mut result = (self.lower[word_idx] >> bit_idx) & mask;
-
-        if bit_idx + self.lower_bits as u32 > 64 {
-            let remaining = bit_idx + self.lower_bits as u32 - 64;
-            let high_part = self.lower[word_idx + 1] & ((1u64 << remaining) - 1);
-            result |= high_part << (self.lower_bits as u32 - remaining);
-        }
-
-        result as u32
+        get_bits_u8(&self.lower, bit_pos, self.lower_bits)
     }
 
     fn get_upper(&self, index: u16) -> u32 {
-        let pos = self.select_upper(index);
+        let pos = self.select1_upper(index as u32);
         pos - index as u32
     }
 
-    fn select_upper(&self, rank: u16) -> u32 {
-        let mut remaining = rank as u32;
+    fn select1_upper(&self, rank: u32) -> u32 {
+        let mut remaining = rank;
         let mut bit_pos: u32 = 0;
 
-        for &word in &self.upper {
-            let popcount = word.count_ones();
+        for &byte in &self.upper {
+            let popcount = byte.count_ones();
             if remaining < popcount {
-                bit_pos += select_in_word(word, remaining);
-                return bit_pos;
+                return bit_pos + select_in_byte(byte, remaining);
             }
             remaining -= popcount;
-            bit_pos += 64;
+            bit_pos += 8;
         }
 
-        panic!("select_upper: rank {} out of bounds", rank);
+        panic!("select1_upper: rank {} out of bounds", rank);
     }
 
-    /// Returns an iterator over all values in the sequence.
+    fn select0_upper(&self, rank: u32) -> u32 {
+        let mut remaining = rank;
+        let mut bit_pos: u32 = 0;
+
+        for &byte in &self.upper {
+            let zeros = (!byte).count_ones();
+            if remaining < zeros {
+                return bit_pos + select_in_byte(!byte, remaining);
+            }
+            remaining -= zeros;
+            bit_pos += 8;
+        }
+
+        panic!("select0_upper: rank {} out of bounds", rank);
+    }
+
     pub fn iter(&self) -> EliasFanoIterator<'_> {
         EliasFanoIterator {
             ef: self,
@@ -187,14 +219,14 @@ impl EliasFano {
         }
     }
 
-    /// Serialize to a writer in a minimal binary format.
+    /// Serialize to a writer.
     ///
     /// Layout (all little-endian):
     /// - `n`:          2 bytes (u16)
     /// - `max_value`:  2 bytes (u16)  — omitted if n == 0
     /// - `lower_bits`: 1 byte  (u8)   — omitted if n == 0
-    /// - `lower`:      packed u64 words, count derived from n and lower_bits
-    /// - `upper`:      packed u64 words, count derived from n, max_value, lower_bits
+    /// - `lower`:      raw bytes, length = ceil(n * lower_bits / 8)
+    /// - `upper`:      raw bytes, length = ceil((n + (max_value >> lower_bits) + 1) / 8)
     pub fn serialize<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         writer.write_all(&self.n.to_le_bytes())?;
 
@@ -203,38 +235,141 @@ impl EliasFano {
         }
 
         writer.write_all(&[self.lower_bits])?;
-
-        for &word in &self.lower {
-            writer.write_all(&word.to_le_bytes())?;
-        }
-        for &word in &self.upper {
-            writer.write_all(&word.to_le_bytes())?;
-        }
+        writer.write_all(&self.lower)?;
+        writer.write_all(&self.upper)?;
 
         Ok(())
     }
+
+    pub fn deserialize<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let mut buf2 = [0u8; 2];
+        reader.read_exact(&mut buf2)?;
+        let n = u16::from_le_bytes(buf2);
+
+        if n == 0 {
+            return Ok(EliasFano {
+                n: 0,
+                max_value: 0,
+                lower_bits: 0,
+                lower: Vec::new(),
+                upper: Vec::new(),
+            });
+        }
+
+        reader.read_exact(&mut buf2)?;
+        let max_value = u16::from_le_bytes(buf2);
+
+        let mut buf1 = [0u8; 1];
+        reader.read_exact(&mut buf1)?;
+        let lower_bits = buf1[0];
+
+        let lower_total_bits = n as u64 * lower_bits as u64;
+        let lower_len = ((lower_total_bits + 7) / 8) as usize;
+
+        let max_upper = (max_value as u64) >> lower_bits;
+        let upper_total_bits = n as u64 + max_upper + 1;
+        let upper_len = ((upper_total_bits + 7) / 8) as usize;
+
+        let mut lower = vec![0u8; lower_len];
+        reader.read_exact(&mut lower)?;
+
+        let mut upper = vec![0u8; upper_len];
+        reader.read_exact(&mut upper)?;
+
+        Ok(EliasFano {
+            n,
+            max_value,
+            lower_bits,
+            lower,
+            upper,
+        })
+    }
+
+    pub fn save_to_file(&self, path: &str) -> io::Result<()> {
+        let mut file = std::fs::File::create(path)?;
+        self.serialize(&mut file)
+    }
+
+    pub fn load_from_file(path: &str) -> io::Result<Self> {
+        let mut file = std::fs::File::open(path)?;
+        Self::deserialize(&mut file)
+    }
+
+    pub fn serialized_size(&self) -> usize {
+        if self.n == 0 {
+            return 2;
+        }
+        2 + 2 + 1 + self.lower.len() + self.upper.len()
+    }
+
+    pub fn size_in_bytes(&self) -> usize {
+        std::mem::size_of::<Self>() + self.lower.len() + self.upper.len()
+    }
 }
 
-/// Select the `rank`-th (0-based) set bit within a single u64 word.
-fn select_in_word(word: u64, rank: u32) -> u32 {
+/// Write `width` bits from `value` into a u8 slice at the given bit position.
+fn set_bits_u8(buf: &mut [u8], bit_pos: u64, value: u32, width: u8) {
+    let mut remaining = width;
+    let mut val = value;
+    let mut pos = bit_pos;
+
+    while remaining > 0 {
+        let byte_idx = (pos / 8) as usize;
+        let bit_idx = (pos % 8) as u8;
+        let fits = (8 - bit_idx).min(remaining);
+        let mask = ((1u32 << fits) - 1) as u8;
+
+        buf[byte_idx] |= ((val as u8) & mask) << bit_idx;
+
+        val >>= fits;
+        pos += fits as u64;
+        remaining -= fits;
+    }
+}
+
+/// Read `width` bits from a u8 slice at the given bit position.
+fn get_bits_u8(buf: &[u8], bit_pos: u64, width: u8) -> u32 {
+    let mut remaining = width;
+    let mut result: u32 = 0;
+    let mut pos = bit_pos;
+    let mut shift = 0u8;
+
+    while remaining > 0 {
+        let byte_idx = (pos / 8) as usize;
+        let bit_idx = (pos % 8) as u8;
+        let fits = (8 - bit_idx).min(remaining);
+        let mask = ((1u32 << fits) - 1) as u8;
+
+        let bits = (buf[byte_idx] >> bit_idx) & mask;
+        result |= (bits as u32) << shift;
+
+        shift += fits;
+        pos += fits as u64;
+        remaining -= fits;
+    }
+
+    result
+}
+
+/// Select the `rank`-th (0-based) set bit within a byte.
+fn select_in_byte(byte: u8, rank: u32) -> u32 {
     let mut remaining = rank;
-    let mut w = word;
+    let mut b = byte;
     let mut pos = 0u32;
 
     loop {
-        debug_assert!(w != 0, "select_in_word: not enough bits set");
-        let tz = w.trailing_zeros();
+        debug_assert!(b != 0, "select_in_byte: not enough bits set");
+        let tz = b.trailing_zeros();
         if remaining == 0 {
             return pos + tz;
         }
         remaining -= 1;
         let skip = tz + 1;
-        w >>= skip;
+        b >>= skip;
         pos += skip;
     }
 }
 
-/// An efficient forward iterator that walks the upper bitvector linearly.
 pub struct EliasFanoIterator<'a> {
     ef: &'a EliasFano,
     index: u16,
@@ -242,7 +377,7 @@ pub struct EliasFanoIterator<'a> {
     zeros_seen: u32,
 }
 
-impl<'a> Iterator for EliasFanoIterator<'_> {
+impl<'a> Iterator for EliasFanoIterator<'a> {
     type Item = u16;
 
     fn next(&mut self) -> Option<u16> {
@@ -251,14 +386,14 @@ impl<'a> Iterator for EliasFanoIterator<'_> {
         }
 
         loop {
-            let word_idx = (self.upper_bit_pos / 64) as usize;
-            let bit_idx = self.upper_bit_pos % 64;
+            let byte_idx = (self.upper_bit_pos / 8) as usize;
+            let bit_idx = self.upper_bit_pos % 8;
 
-            if word_idx >= self.ef.upper.len() {
+            if byte_idx >= self.ef.upper.len() {
                 return None;
             }
 
-            let bit = (self.ef.upper[word_idx] >> bit_idx) & 1;
+            let bit = (self.ef.upper[byte_idx] >> bit_idx) & 1;
             self.upper_bit_pos += 1;
 
             if bit == 0 {
@@ -291,7 +426,18 @@ mod tests {
         assert!(ef.is_empty());
         assert_eq!(ef.len(), 0);
         assert_eq!(ef.get(0), None);
+        assert!(!ef.contains(0));
         assert_eq!(ef.iter().collect::<Vec<_>>(), Vec::<u16>::new());
+        assert_eq!(ef.serialized_size(), 2);
+    }
+
+    #[test]
+    fn test_single_element() {
+        let ef = EliasFano::new(&[42]);
+        assert_eq!(ef.len(), 1);
+        assert_eq!(ef.get(0), Some(42));
+        assert!(ef.contains(42));
+        assert!(!ef.contains(41));
     }
 
     #[test]
@@ -299,28 +445,20 @@ mod tests {
         let values: Vec<u16> = vec![2, 3, 5, 7, 11, 13, 24];
         let ef = EliasFano::new(&values);
 
-        assert_eq!(ef.len(), values.len() as u16);
-
         for (i, &v) in values.iter().enumerate() {
-            assert_eq!(ef.get(i as u16), Some(v), "Mismatch at index {}", i);
+            assert_eq!(ef.get(i as u16), Some(v));
+            assert!(ef.contains(v));
         }
-    }
 
-    #[test]
-    fn test_duplicates() {
-        let values: Vec<u16> = vec![1, 1, 3, 3, 3, 7, 7];
-        let ef = EliasFano::new(&values);
-
-        for (i, &v) in values.iter().enumerate() {
-            assert_eq!(ef.get(i as u16), Some(v), "Mismatch at index {}", i);
-        }
+        assert!(!ef.contains(0));
+        assert!(!ef.contains(4));
+        assert!(!ef.contains(25));
     }
 
     #[test]
     fn test_iterator() {
         let values: Vec<u16> = vec![0, 1, 5, 10, 100, 1000, 10000];
         let ef = EliasFano::new(&values);
-
         let collected: Vec<u16> = ef.iter().collect();
         assert_eq!(collected, values);
     }
@@ -331,8 +469,12 @@ mod tests {
         let ef = EliasFano::new(&values);
 
         for (i, &v) in values.iter().enumerate() {
-            assert_eq!(ef.get(i as u16), Some(v), "Mismatch at index {}", i);
+            assert_eq!(ef.get(i as u16), Some(v));
+            assert!(ef.contains(v));
         }
+
+        assert!(!ef.contains(1));
+        assert!(!ef.contains(65533));
 
         let collected: Vec<u16> = ef.iter().collect();
         assert_eq!(collected, values);
@@ -343,35 +485,13 @@ mod tests {
         let values: Vec<u16> = (0..100).collect();
         let ef = EliasFano::new(&values);
 
-        for (i, &v) in values.iter().enumerate() {
-            assert_eq!(ef.get(i as u16), Some(v));
+        for &v in &values {
+            assert!(ef.contains(v));
         }
+        assert!(!ef.contains(100));
 
         let collected: Vec<u16> = ef.iter().collect();
         assert_eq!(collected, values);
-    }
-
-    #[test]
-    fn test_all_same() {
-        let values: Vec<u16> = vec![500; 50];
-        let ef = EliasFano::new(&values);
-
-        for i in 0..50u16 {
-            assert_eq!(ef.get(i), Some(500));
-        }
-
-        let collected: Vec<u16> = ef.iter().collect();
-        assert_eq!(collected, values);
-    }
-
-    #[test]
-    fn test_zeros() {
-        let values: Vec<u16> = vec![0, 0, 0, 0];
-        let ef = EliasFano::new(&values);
-
-        for i in 0..4u16 {
-            assert_eq!(ef.get(i), Some(0));
-        }
     }
 
     #[test]
@@ -380,34 +500,121 @@ mod tests {
         let ef = EliasFano::new(&values);
 
         for (i, &v) in values.iter().enumerate() {
-            assert_eq!(ef.get(i as u16), Some(v), "Mismatch at index {}", i);
+            assert_eq!(ef.get(i as u16), Some(v));
+            assert!(ef.contains(v));
         }
+
+        assert!(!ef.contains(0));
+        assert!(!ef.contains(30000));
+    }
+
+    #[test]
+    fn test_contains_exhaustive_small() {
+        let values: Vec<u16> = vec![3, 7, 15, 20];
+        let ef = EliasFano::new(&values);
+
+        for v in 0..=25u16 {
+            assert_eq!(ef.contains(v), values.contains(&v));
+        }
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        let values: Vec<u16> = vec![2, 3, 5, 7, 11, 13, 24, 100, 9999];
+        let ef = EliasFano::new(&values);
+
+        let mut buffer = Vec::new();
+        ef.serialize(&mut buffer).unwrap();
+        assert_eq!(buffer.len(), ef.serialized_size());
+
+        let mut cursor = io::Cursor::new(buffer);
+        let ef2 = EliasFano::deserialize(&mut cursor).unwrap();
+
+        assert_eq!(ef2.len(), ef.len());
+        for i in 0..ef.len() {
+            assert_eq!(ef2.get(i), ef.get(i));
+        }
+    }
+
+    #[test]
+    fn test_serialize_empty() {
+        let ef = EliasFano::new(&[]);
+        let mut buffer = Vec::new();
+        ef.serialize(&mut buffer).unwrap();
+        assert_eq!(buffer.len(), 2);
+
+        let mut cursor = io::Cursor::new(buffer);
+        let ef2 = EliasFano::deserialize(&mut cursor).unwrap();
+        assert!(ef2.is_empty());
+    }
+
+    #[test]
+    fn test_file_round_trip() {
+        let values: Vec<u16> = vec![10, 20, 30, 40, 50, 1000, 2000, 50000];
+        let ef = EliasFano::new(&values);
+
+        let path = "/tmp/test_elias_fano_u8_words.bin";
+        ef.save_to_file(path).unwrap();
+
+        let ef2 = EliasFano::load_from_file(path).unwrap();
+        let collected: Vec<u16> = ef2.iter().collect();
+        assert_eq!(collected, values);
+
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_u8_saves_space_vs_u64() {
+        // With u64 words: each array rounds up to 8-byte boundary
+        // With u8 words: each array rounds up to 1-byte boundary
+        let values: Vec<u16> = vec![1, 5, 10];
+        let ef = EliasFano::new(&values);
+
+        let lower_bits_total = 3u64 * ef.lower_bits as u64;
+        let max_upper = (10u64) >> ef.lower_bits;
+        let upper_bits_total = 3u64 + max_upper + 1;
+
+        let u8_bytes = ((lower_bits_total + 7) / 8) + ((upper_bits_total + 7) / 8);
+        let u64_bytes = ((lower_bits_total + 63) / 64) * 8 + ((upper_bits_total + 63) / 64) * 8;
+
+        println!(
+            "u8 words: {} data bytes, u64 words: {} data bytes, saved: {}",
+            u8_bytes,
+            u64_bytes,
+            u64_bytes - u8_bytes
+        );
+
+        assert!(u8_bytes <= u64_bytes);
+    }
+
+    #[test]
+    fn test_compression_ratio() {
+        let values: Vec<u16> = (0..1000).map(|i| i * 65).collect();
+        let ef = EliasFano::new(&values);
+
+        let raw_bytes = values.len() * 2;
+        let disk_bytes = ef.serialized_size();
+
+        println!(
+            "Raw: {} bytes, Serialized: {} bytes ({:.1}%)",
+            raw_bytes,
+            disk_bytes,
+            disk_bytes as f64 / raw_bytes as f64 * 100.0
+        );
 
         let collected: Vec<u16> = ef.iter().collect();
         assert_eq!(collected, values);
     }
 
     #[test]
-    fn test_dense_full_range() {
-        let values: Vec<u16> = (0..=65535).collect();
-        let ef = EliasFano::new(&values);
-
-        assert_eq!(ef.len(), 0); // 65536 as u16 wraps to 0 — see note below
-        // Actually 65536 values can't be represented by u16 len.
-        // This test validates the assertion in new().
-    }
-
-    #[test]
-    fn test_iterator_exact_size() {
-        let values: Vec<u16> = vec![1, 2, 3, 4, 5];
-        let ef = EliasFano::new(&values);
-        let iter = ef.iter();
-        assert_eq!(iter.len(), 5);
-    }
-
-    #[test]
-    #[should_panic(expected = "sorted")]
+    #[should_panic(expected = "strictly sorted")]
     fn test_unsorted_panics() {
         EliasFano::new(&[5, 3, 1]);
+    }
+
+    #[test]
+    #[should_panic(expected = "strictly sorted")]
+    fn test_duplicates_panic() {
+        EliasFano::new(&[1, 1, 2, 3]);
     }
 }

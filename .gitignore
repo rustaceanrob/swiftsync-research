@@ -4,3 +4,4 @@ Cargo.lock
 *.csv
 *.gif
 *.png
+*.bin
