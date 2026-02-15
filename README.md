@@ -12,13 +12,23 @@ A concise representation of the UTXO set must also be shared to use _SwiftSync_.
 
 Set your `BITCOIN_DIR` environment variable to an absolute path to your Bitcoin data directory.
 
-- Report the savings due to the `ReconstructableScript` format:
+- Analyze the different techniques of encoding hints, which requires a bitmap to UTXOs in blocks:
+
+```
+curl -o bitcoin.hints https://utxohints.store/hints/bitcoin # Set HINTS_FILE to the absolute path
+```
+
+```
+export HINTS_FILE=/path/to/bitcoin.hints && cargo run --bin compare_hints --release
+```
+
+- Show the savings due to the `ReconstructableScript` format:
 
 ```
 export BITCOIN_DIR=/path/to/bitcoin/datadir && cargo run --bin reconstructable_script_savings --release
 ```
 
-- Report the savings due to the amount compression format:
+- Show the savings due to the amount compression format:
 
 ```
 export BITCOIN_DIR=/path/to/bitcoin/datadir && cargo run --bin compressed_amount_savings --release
@@ -40,14 +50,4 @@ export BITCOIN_DIR=/path/to/bitcoin/datadir && cargo run --bin compute_coin_ages
 
 ```
 cargo run --bin plot --release 10000 #filter coins with ages older than 10000
-```
-
-- Analyze the distribution of coins within blocks, which requires a bitmap to UTXOs in blocks:
-
-```
-curl -o bitcoin.hints https://utxohints.store/hints/bitcoin
-```
-
-```
-export HINTS_FILE=/path/to/bitcoin.hints && cargo run --bin hints --release
 ```
