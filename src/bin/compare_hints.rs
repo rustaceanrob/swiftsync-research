@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::{fs::File, io::Write};
 
 use hintsfile::EliasFano;
 use swiftsync_research::{BitmapHints, compact_size};
@@ -30,6 +30,7 @@ fn size_run_lengths_varint(elements: &[u16]) -> usize {
 fn main() {
     let hints_file = std::env::var("HINTS_FILE").unwrap();
     println!("Using hintsfile {hints_file}");
+    print!("Generating statistics");
     let hints_file = hints_file.parse::<std::path::PathBuf>().unwrap();
     let file = File::open(hints_file).unwrap();
     let mut hints = BitmapHints::from_file(file);
@@ -38,17 +39,21 @@ fn main() {
     let mut size_literal_indices = 0;
     let mut size_rle_compact_size = 0;
     let mut size_rle_varint = 0;
-    for height in 1..stop {
+    let mut ef_file = File::create("ef.bin").unwrap();
+    for height in 1..=stop {
         let indices = hints.get_indexes(height);
         let ef = EliasFano::compress(&indices);
         size_ef += ef.size();
+        ef.write(&mut ef_file).unwrap();
         size_literal_indices += compact_size(indices.len() as u64) + 2 * indices.len();
         size_rle_compact_size += size_run_lengths_compact_size(&indices);
         size_rle_varint += size_run_lengths_varint(&indices);
         if height % 10_000 == 0 {
-            println!("({height}/{stop})");
+            print!(".");
         }
     }
+    ef_file.flush().unwrap();
+    println!(">>>");
     println!(
         "Size of Elias-Fano encoding {:<4}MB",
         size_ef as f64 / 1_000_000.
