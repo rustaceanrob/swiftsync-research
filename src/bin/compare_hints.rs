@@ -1,6 +1,6 @@
-use std::{fs::File, io::Write};
+use std::fs::File;
 
-use hintsfile::EliasFano;
+use hintsfile::{EliasFano, HintsfileBuilder};
 use swiftsync_research::{BitmapHints, compact_size};
 
 fn size_run_lengths_compact_size(elements: &[u16]) -> usize {
@@ -39,12 +39,13 @@ fn main() {
     let mut size_literal_indices = 0;
     let mut size_rle_compact_size = 0;
     let mut size_rle_varint = 0;
-    let mut ef_file = File::create("ef.bin").unwrap();
+    let ef_file = File::create("ef.bin").unwrap();
+    let mut builder = HintsfileBuilder::start(ef_file).unwrap();
     for height in 1..=stop {
         let indices = hints.get_indexes(height);
         let ef = EliasFano::compress(&indices);
         size_ef += ef.size();
-        ef.write(&mut ef_file).unwrap();
+        builder.append(ef).unwrap();
         size_literal_indices += compact_size(indices.len() as u64) + 2 * indices.len();
         size_rle_compact_size += size_run_lengths_compact_size(&indices);
         size_rle_varint += size_run_lengths_varint(&indices);
@@ -52,7 +53,7 @@ fn main() {
             print!(".");
         }
     }
-    ef_file.flush().unwrap();
+    builder.finish().unwrap();
     println!(">>>");
     println!(
         "Size of Elias-Fano encoding {:<4}MB",
