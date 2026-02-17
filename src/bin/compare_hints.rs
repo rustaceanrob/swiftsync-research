@@ -3,7 +3,7 @@ use std::fs::File;
 use hintsfile::{EliasFano, HintsfileBuilder};
 use swiftsync_research::{BitmapHints, compact_size};
 
-fn size_run_lengths_compact_size(elements: &[u16]) -> usize {
+fn size_run_lengths_compact_size(elements: &[u32]) -> usize {
     let mut size = compact_size(elements.len() as u64);
     assert!(elements.is_sorted());
     let mut prev = 0;
@@ -15,7 +15,7 @@ fn size_run_lengths_compact_size(elements: &[u16]) -> usize {
     size
 }
 
-fn size_run_lengths_varint(elements: &[u16]) -> usize {
+fn size_run_lengths_varint(elements: &[u32]) -> usize {
     let mut size = swiftsync_research::size_varint(elements.len() as u64);
     assert!(elements.is_sorted());
     let mut prev = 0;
@@ -40,17 +40,18 @@ fn main() {
     let mut size_rle_compact_size = 0;
     let mut size_rle_varint = 0;
     let ef_file = File::create("ef.bin").unwrap();
-    let mut builder = HintsfileBuilder::start(ef_file).unwrap();
+    let builder = HintsfileBuilder::new(ef_file);
+    let mut builder = builder.initialize(stop).unwrap();
     for height in 1..=stop {
         let indices = hints.get_indexes(height);
         let ef = EliasFano::compress(&indices);
-        size_ef += ef.size();
+        size_ef += ef.approximate_size();
         builder.append(ef).unwrap();
         size_literal_indices += compact_size(indices.len() as u64) + 2 * indices.len();
         size_rle_compact_size += size_run_lengths_compact_size(&indices);
         size_rle_varint += size_run_lengths_varint(&indices);
         if height % 10_000 == 0 {
-            print!(".");
+            println!("({height}/{stop})");
         }
     }
     builder.finish().unwrap();
