@@ -10,3 +10,4 @@ hintsfile = { git = "https://github.com/rustaceanrob/hintsfile" }
 kernel = { package = "bitcoinkernel", version = "0.2.0" }
 plotters = "0.3.7"
 serde = { version = "1.0.228", features = ["derive"] }
+statrs = "0.18.0"
