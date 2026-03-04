@@ -138,7 +138,7 @@ impl BitmapHints {
                 curr_byte = u8::from_le_bytes(single_byte_arr);
             }
             if ((curr_byte >> leftovers) & 0x01) == 0x01 {
-                unspents.push(bit_pos as u32);
+                unspents.push(bit_pos);
             }
         }
         unspents

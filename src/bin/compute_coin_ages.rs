@@ -1,11 +1,23 @@
 use kernel::{
     ChainType, ChainstateManager, ContextBuilder,
-    core::{BlockSpentOutputsExt, CoinExt, TransactionSpentOutputsExt},
+    core::{
+        BlockSpentOutputsExt, CoinExt, TransactionExt, TransactionSpentOutputsExt, TxInExt,
+        TxOutPointExt, TxidExt,
+    },
 };
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::PathBuf,
+};
 
 type Age = u32;
 type Count = u64;
+
+#[derive(Debug, std::hash::Hash, PartialEq, Eq, PartialOrd, Ord)]
+struct OutPoint {
+    txid: [u8; 32],
+    vout: u32,
+}
 
 fn main() {
     let bitcoin_dir = std::env::var("BITCOIN_DIR").unwrap();
@@ -49,6 +61,25 @@ fn main() {
                     let age = curr_height - creation_height;
                     *ages.entry(age).or_insert(0) += 1;
                     block_ages.push(age);
+                }
+            }
+        }
+        let block = chainman.read_block_data(&entry).unwrap();
+        let mut created_outputs = HashSet::new();
+        for transaction in block.transactions().skip(1) {
+            let txid = transaction.txid().to_bytes();
+            for vout in 0..transaction.outputs().len() {
+                created_outputs.insert(OutPoint {
+                    txid,
+                    vout: vout as u32,
+                });
+            }
+            for input in transaction.inputs() {
+                let txid = input.outpoint().txid().to_bytes();
+                let vout = input.outpoint().index();
+                if created_outputs.contains(&OutPoint { txid, vout }) {
+                    *ages.entry(0).or_insert(0) += 1;
+                    block_ages.push(0);
                 }
             }
         }
