@@ -1,5 +1,5 @@
 use kernel::{
-    ChainType, ChainstateManager, ContextBuilder,
+    ChainType, ChainstateManager, CoinRef, ContextBuilder,
     core::{BlockSpentOutputsExt, CoinExt, ScriptPubkeyExt, TransactionSpentOutputsExt, TxOutExt},
 };
 use std::path::PathBuf;
@@ -20,6 +20,7 @@ fn main() {
     )
     .unwrap();
     chainman.import_blocks().unwrap();
+    let mut total_undo_size: u128 = 0;
     let mut total_savings_bytes: u128 = 0;
     let mut total_extra: u128 = 0;
     let mut total_p2tr: u128 = 0;
@@ -39,6 +40,7 @@ fn main() {
         let block = chainman.read_spent_outputs(&entry).unwrap();
         for output in block.iter() {
             for coin in output.coins() {
+                total_undo_size += coin.size_bytes();
                 let tx_out = coin.output();
                 let spk = tx_out.script_pubkey();
                 let bytes = spk.to_bytes();
@@ -111,4 +113,20 @@ fn main() {
         total_p2pk_uncompressed / 1_000_000
     );
     println!("Count unknown scripts: {}", total_extra);
+    println!("Total undo size: {}GB", total_undo_size / 1_000_000_000);
+}
+
+trait SizeExt {
+    fn size_bytes(&self) -> u128;
+}
+
+#[allow(clippy::extra_unused_lifetimes)]
+impl<'a> SizeExt for CoinRef<'_> {
+    fn size_bytes(&self) -> u128 {
+        let mut total = 0u128;
+        total += self.confirmation_height().to_le_bytes().len() as u128;
+        total += self.output().script_pubkey().to_bytes().len() as u128;
+        total += self.output().value().to_le_bytes().len() as u128;
+        total
+    }
 }
