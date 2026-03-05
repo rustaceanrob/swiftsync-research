@@ -1,7 +1,7 @@
 use statrs::function::gamma::ln_gamma;
 use std::fs::File;
 
-use swiftsync_research::BitmapHints;
+use hintsfile::Hintsfile;
 
 #[allow(clippy::excessive_precision)]
 const LN_2: f64 = 0.693147180559945309417232121458176568_f64;
@@ -22,8 +22,8 @@ fn main() {
     let hints_file = std::env::var("HINTS_FILE").unwrap();
     println!("Using hintsfile {hints_file}");
     let hints_file = hints_file.parse::<std::path::PathBuf>().unwrap();
-    let file = File::open(hints_file).unwrap();
-    let mut hints = BitmapHints::from_file(file);
+    let mut file = File::open(hints_file).unwrap();
+    let hints = Hintsfile::from_reader(&mut file).unwrap();
     let stop = hints.stop_height();
     let mut min_bytes_req = 0.00;
     println!("Computing estimate. This will take a minute...");
@@ -31,7 +31,7 @@ fn main() {
         if entry_height == 0 {
             continue;
         }
-        let indices = hints.get_indexes(entry_height);
+        let indices = hints.indices_at_height(entry_height).unwrap();
         let n = indices.len() as u32;
         let m = indices.iter().max().copied().unwrap_or_default() + 1;
         min_bytes_req += min_bits_permutation(m, n) / 8.0;
@@ -40,7 +40,7 @@ fn main() {
         }
     }
     println!(
-        "Computed theoretical minimum size required {}MB",
+        "Computed theoretical minimum size required {:<4}MB",
         min_bytes_req / 1_000_000.
     );
 }

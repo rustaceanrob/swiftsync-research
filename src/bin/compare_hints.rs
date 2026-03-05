@@ -1,7 +1,7 @@
 use std::fs::File;
 
-use hintsfile::{EliasFano, HintsfileBuilder};
-use swiftsync_research::{BitmapHints, compact_size};
+use hintsfile::{EliasFano, Hintsfile};
+use swiftsync_research::compact_size;
 
 fn size_run_lengths_compact_size(elements: &[u32]) -> usize {
     let mut size = compact_size(elements.len() as u64);
@@ -32,21 +32,17 @@ fn main() {
     println!("Using hintsfile {hints_file}");
     print!("Generating statistics");
     let hints_file = hints_file.parse::<std::path::PathBuf>().unwrap();
-    let file = File::open(hints_file).unwrap();
-    let mut hints = BitmapHints::from_file(file);
+    let mut file = File::open(hints_file).unwrap();
+    let hints = Hintsfile::from_reader(&mut file).unwrap();
     let stop = hints.stop_height();
     let mut size_ef = 0;
     let mut size_literal_indices = 0;
     let mut size_rle_compact_size = 0;
     let mut size_rle_varint = 0;
-    let ef_file = File::create("ef.bin").unwrap();
-    let builder = HintsfileBuilder::new(ef_file);
-    let mut builder = builder.initialize(stop).unwrap();
     for height in 1..=stop {
-        let indices = hints.get_indexes(height);
+        let indices = hints.indices_at_height(height).unwrap();
         let ef = EliasFano::compress(&indices);
         size_ef += ef.approximate_size();
-        builder.append(ef).unwrap();
         size_literal_indices += compact_size(indices.len() as u64) + 2 * indices.len();
         size_rle_compact_size += size_run_lengths_compact_size(&indices);
         size_rle_varint += size_run_lengths_varint(&indices);
@@ -54,7 +50,6 @@ fn main() {
             println!("({height}/{stop})");
         }
     }
-    builder.finish().unwrap();
     println!(">>>");
     println!(
         "Size of Elias-Fano encoding {:<4}MB",
@@ -67,10 +62,6 @@ fn main() {
     println!(
         "Size of VarInt encoded run-lengths {:<4}MB",
         size_rle_varint as f64 / 1_000_000.
-    );
-    println!(
-        "Size of bitmap encoded positions {:<4}MB",
-        hints.size() as f64 / 1_000_000.
     );
     println!(
         "Size of encoding indices literally {:<4}MB",
